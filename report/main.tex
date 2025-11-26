@@ -104,7 +104,7 @@
 \section{Ход работы}
 
 В данной работе используется архитектура RISC-V с набором команд RV32I.
-В соответствии с \textit{соглашением о вызовах функций RISC-V} первые четыре аргумента функции передаются через регистры \texttt{a0-a3}, а результат возвращается в регистре \texttt{a0}.
+В соответствии с \textit{соглашением о вызовах функций RISC-V} аргументы функции передаются через регистры \texttt{a0-a7}, а результат возвращается в регистрах \texttt{a0, a1}.
 Ниже приведена сводная таблица используемых регистров и их назначение в программе (таблица \ref{tab:regusage}).
 \begin{table}[H]
 \centering
@@ -122,7 +122,7 @@
 \hline
 \texttt{sp} & x2 & Указатель на вершину стека \\
 \hline
-\texttt{s0} & x8 & Базовый адрес матрицы \\
+\texttt{s0} & x8 & Адрес матрицы \\
 \hline
 \texttt{s1} & x9 & Текущее минимальное значение \\
 \hline
@@ -130,22 +130,20 @@
 \hline
 \texttt{t0} & x5 & Граница цикла \\
 \hline
-\texttt{t1} & x6 & Вычисление смещения matrix[i][i] \\
+\texttt{t1} & x6 & Смещение в матрице \\
 \hline
-\texttt{t2} & x7 & Текущий элемент matrix[i][i] \\
+\texttt{t2} & x7 & Текущий элемент в матрице \\
 \hline
-\texttt{a0} & x10 & Первый аргумент функции / возвращаемое значение \\
+\texttt{a0} & x10 & Аргумент функции/код системного вызова, возвращаемое значение \\
 \hline
-\texttt{a1} & x11 & Второй аргумент функции / аргумент для \texttt{ecall} \\
-\hline
-\texttt{a7} & x17 & Код системного вызова (\texttt{ecall}) \\
+\texttt{a1} & x11 & Аргумент для \texttt{ecall} \\
 \hline
 \end{tabularx}
 \end{table}
 
 \clearpage
 
-Прежде чем описывать функциональную часть программы разместим входные и неизменяемые данные в сегменте \texttt{.data}.
+Прежде чем описывать функциональную часть программы разместим входные и неизменяемые данные в секции \texttt{.data}.
 
 \begin{listing}[H] 
     \begin{minted}[fontsize=\small, linenos, frame=single, breaklines]{asm}
@@ -165,11 +163,11 @@
 \label{lst:asmcode_dataseg} 
 \end{listing}
 
-Все инструкции программы разместим в сегменте \texttt{.text}; для глобальной видимости функций используется метка \texttt{.globl}.
-В функции \texttt{findMinElement} вначале создадим стековый фрейм для сохранения регистров, которые будут изменяться. 
+Все инструкции программы разместим в секции \texttt{.text}; для глобальной видимости функций используется метка \texttt{.globl}.
+В функции \textit{findMinElement} вначале создадим стековый фрейм для сохранения регистров, которые будут изменяться. 
 При этом выделим 16 байт на стек и сохраним в него регистры \texttt{ra}, \texttt{s0}, \texttt{s1} и \texttt{s2}.
 При завершении функции восстановим сохранённые значения регистров и освободим стековый фрейм.
-
+Ниже в листинге \ref{lst:asmcode_findminelem} приведён полный код функции \textit{findMinElement}:
 \begin{listing}[H] 
     \begin{minted}[fontsize=\small, linenos, frame=single, breaklines]{asm}
 	.text
@@ -180,26 +178,19 @@
         sw s0, 8(sp)
         sw s1, 4(sp)
         sw s2, 0(sp)
-
-        mv s0, a0                 # s0 = matrix address
-
-        lw s1, 0(s0)              # s1 = min = matrix[0][0]
-
-        li s2, 1                  # i = 1
+        mv s0, a0
+        lw s1, 0(s0)
+        li s2, 1
 
     loop:
         li t0, 6
-        bge s2, t0, endloop       # if i >= 6 → exit
-
-        # matrix[i][i] offset = (i*6 + i)*4 = i*7*4
+        bge s2, t0, endloop
         li t1, 7
-        mul t1, t1, s2            # t1 = i * 7
-        slli t1, t1, 2            # t1 *= 4
-        add t1, s0, t1            # t1 = &matrix[i][i]
-
-        lw t2, 0(t1)              # t2 = matrix[i][i]
-
-        blt t2, s1, updateMin    # if matrix[i][i] < min
+        mul t1, t1, s2
+        slli t1, t1, 2
+        add t1, s0, t1
+        lw t2, 0(t1)
+        blt t2, s1, updateMin
         j next_i
 
     updateMin:
@@ -210,8 +201,7 @@
         j loop
 
     endloop:
-        mv a0, s1                 # return min
-
+        mv a0, s1
         lw ra, 12(sp)
         lw s0, 8(sp)
         lw s1, 4(sp)
@@ -223,7 +213,7 @@
 \label{lst:asmcode_findminelem} 
 \end{listing}
 
-Ниже приведён код функции \texttt{main}, которая вызывает функцию поиска минимального элемента и выводит результат на экран с использованием системных вызовов.
+Ниже в листинге \ref{lst:asmcode_main} приведён полный код функции \textit{main}, которая вызывает функцию поиска минимального элемента и выводит результат на экран с использованием системных вызовов.
 Код системного вызова записывается в регистр \texttt{a7}, a аргумент в \texttt{a1}:
 \begin{itemize}
     \item Код 1 -- вывод целого числа.
@@ -237,10 +227,10 @@
         addi sp, sp, -16
         sw ra, 12(sp)
 
-        la a0, matrix             # argument: pointer to matrix
-        call findMinElement       # a0 <- result
+        la a0, matrix
+        call findMinElement
 
-        mv t0, a0                 # save result in t0
+        mv t0, a0
     
         # print string
         la a1, minelemstr
@@ -268,7 +258,7 @@
 \label{lst:asmcode_main} 
 \end{listing}
 
-Ниже в листинге \ref{lst:ccode} приведён код программы на языке C, решающей ту же задачу.
+Ниже в листинге \ref{lst:ccode} приведён полный код программы на языке C, решающей ту же задачу.
 \begin{listing}[H]
     \begin{minted}[fontsize=\small, linenos, frame=single, breaklines]{c}
     #include <stdio.h>
@@ -312,7 +302,7 @@
 \end{listing}
 
 Сборка и запуск программы осуществлялись с использованием собранного кросс-компилятора \textit{RISC-V} и эмулятора \textit{QEMU}. 
-Ниже приведены команды, использованные для сборки и запуска программы:
+Ниже приведены команды, использованные для сборки и запуска программы из корня проекта:
 
 \begin{center}
 \begin{minipage}{0.7\linewidth}
@@ -322,13 +312,12 @@ make -C src && qemu-riscv32 src/main.elf
 \end{minipage}
 \end{center}
 
-Далее код был переписан на языке ассемблере \textit{RISC-V} и проверен в симуляторе \textit{Venus}.
-
+Переписанный код на языке ассемблера был проверен в симуляторе \textit{Venus}.
 
 \section{Выводы}
 
-В ходе выполнения лабораторной работы изучены базовые инструкции архитектуры RISC-V. 
+В ходе выполнения лабораторной работы изучены базовые принципы написания кода под архитектуру RISC-V. 
 Реализована программа на языке C и её эквивалент на языке ассемблера. 
-Ознакомились с процессом сборки и запуска программ для архитектуры RISC-V. 
+Ознакомились с процессом сборки и запуска программ под архитектуру RISC-V. 
 
 \end{document}
